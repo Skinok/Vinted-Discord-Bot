@@ -24,16 +24,15 @@ async def on_ready():
     ██████╔╝╚██████╔╝   ██║   
     ╚═════╝  ╚═════╝    ╚═╝   
                           
-            By 2$py#5340
-
+            By Skinok
     """)
     print(f"Connecté à : {bot.user.name}")
-    await bot.change_presence(activity=discord.Game(name="Script from : https://github.com/2spy/Vinted-Discord-Bot"))
+    #await bot.change_presence(activity=discord.Streaming(name="Script from : https://github.com/2spy/Vinted-Discord-Bot"))
 
 
 @bot.command()
 async def sub(ctx, vintedurl):
-    x = await ctx.channel.create_webhook(name="Discord-test")
+    x = await ctx.channel.create_webhook(name=ctx.channel.name + "-webhook")
     with open("config.json", 'w+') as configedit:
         configs["suburl"][str(x.url)] = {}
         configs["suburl"][str(x.url)]["url"] = str(vintedurl)
@@ -91,7 +90,8 @@ async def change_color_embed(ctx, color):
 @bot.command()
 async def help(ctx):
     embed = discord.Embed(title="Help Vinted Bot",color=0xFFFFFF)
-    embed.set_thumbnail(url=bot.user.avatar_url)
+    if hasattr(bot.user, 'avatar_url') and bot.user.avatar_url is not None:
+        embed.set_thumbnail(url=bot.user.avatar_url)
     embed.add_field(name="**sub**",value=f"**Usage :** ``{configs['prefix']}sub url_vinted``",inline=False)
     embed.add_field(name="**remove_sub**",value=f"**Usage :** ``{configs['prefix']}remove_sub``",inline=False)
     embed.add_field(name="**change_url**",value=f"**Usage :** ``{configs['prefix']}change_url nouvel_url_vinted``",inline=False)
