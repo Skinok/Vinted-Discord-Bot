@@ -10,7 +10,12 @@ import json
 import shutil
 import threading
 import time
+import datetime
 import sys
+import pytz 
+import tzlocal
+
+import multiprocessing
 
 #by pass cloudfare anti-bot
 import cloudscraper
@@ -45,8 +50,13 @@ def get_info_post(url):
         response = scraper.get(url).text  # => "<!DOCTYPE html><html><head>..."
         soup = BeautifulSoup(response, "html.parser")
 
-        res = soup.findAll('script', {"class": "js-react-on-rails-component"})
+        # Is it an old item ?
+        added_on = soup.findAll('time', {"class": "relative"})
+        item_date = added_on[0].attrs["datetime"]
+        print("Ajouté le :" + str(item_date))
 
+        # Info items
+        res = soup.findAll('script', {"class": "js-react-on-rails-component"})
         descindice = 0
         userinfoindice = 0
         for i in range(len(res)):
@@ -71,6 +81,10 @@ def get_info_post(url):
         pays = userinfo["user"]["country_title"]
         ville = userinfo["user"]["city"]
 
+        # check if date of add is greater than bot launching date
+        item_add_date = datetime.datetime.strptime(item_date,'%Y-%m-%dT%H:%M:%S%z')
+        isNewItem = item_add_date > launching_date_time
+
         lesinfo = {}
 
         if titre == "":
@@ -87,6 +101,8 @@ def get_info_post(url):
             pays = "Pas de donnée"
         if ville == "":
             ville = "Pas de donnée"
+        if item_add_date == "":
+            isNewItem = True
 
         try:
             lesinfo["titre"] = titre
@@ -96,16 +112,25 @@ def get_info_post(url):
             lesinfo["username"] = username
             lesinfo["pays"] = pays
             lesinfo["ville"] = ville
+            lesinfo["isNewItem"] = isNewItem
+
         except Exception as err:
             print(err)
         return lesinfo
-    except:
+    except ValueError as err:
+        print(f"ValueError {err=}, {type(err)=}")
+        pass
+    except TypeError as err:
+        print(f"TypeError {err=}, {type(err)=}")
+        pass
+    except Exception as err:
+        print(f"Unexpected {err=}, {type(err)=}")
         pass
 
 
 def search(url):
     try:
-        time.sleep(5)
+        time.sleep(configs["bot-timing"]["sleep_time_between_requests"])
         print(f"{Spy.blanc}[{Spy.gris}RECHERCHE{Spy.blanc}] - Le bot cherche des nouveaux items...")
         
         # By pass cloudfare scraper
@@ -187,26 +212,61 @@ asciiart = f"""{Spy.rouge}
 print(asciiart + "\n\n")
 
 posting = []
+#channel = discord.utils.get(server.channels, name="Channel_name_here", type="ChannelType.voice")
 
+local_timezone = tzlocal.get_localzone() # get pytz tzinfo
+utc_time = datetime.datetime.utcnow()
+launching_date_time = utc_time.replace(tzinfo=pytz.utc).astimezone(local_timezone)
 
 sys.stdout.write("\x1b]2;Vinted Bot\x07")
-class moniteur:
-    def __init__(self, weburl, url):
+
+####################################################
+# Main vinted Thread for each Saloon
+####################################################
+class Moniteur(threading.Thread):
+
+    def __init__(self, webhurl, url, *args, **kwargs):
+        super().__init__(target=self, args=args, kwargs=kwargs)
+        self._stop = threading.Event()
+        self.webhurl = webhurl
+        self.url = url        
+        pass
+
+    # function using _stop function
+    def stop(self):
+        self._stop.set()
+ 
+    def stopped(self):
+        return self._stop.isSet()
+
+    def run(self, *args, **kwargs):
+        # thread kill switch
         while True:
+            if self.stopped():
+                return
             try:
-                z = search(str(url))
+                z = search(str(self.url))
                 x = z["items"]["catalogItems"]["byId"]
                 dictlist = list(x)
                 for i in range(9, -1, -1):
-                    time.sleep(1)
+                    time.sleep(configs["bot-timing"]["sleep_time_item_found"])
                     post = dictlist[i - 1]
+
                     if str(post) in posting:
-                        print(f"{Spy.blanc}[{Spy.rouge}{post}{Spy.blanc}] - Item déjà envoyé !")
-                        time.sleep(1)
+                        print(f"{Spy.blanc}[{Spy.rouge}{post}{Spy.blanc}] - Item déjà traité")
+                        #time.sleep(configs["bot-timing"]["sleep_time_item_found"])
                         continue
                     else:
-                        print(f"{Spy.blanc}[{Spy.vert}{post}{Spy.blanc}] - Nouvel item trouvé !")
+                        
                         info = get_info_post(x[str(post)]["url"])
+                        
+                        # Check if item is new
+                        if info["isNewItem"] == False:
+                            print(f"{Spy.blanc}[{Spy.rouge}{post}{Spy.blanc}] - Item trop ancien !")
+                            posting.append(str(post))
+                            continue
+
+                        print(f"{Spy.blanc}[{Spy.vert}{post}{Spy.blanc}] - Nouvel item trouvé !")
 
                         data = {"username": "$py",
                                 "avatar_url": "https://cdn.discordapp.com/avatars/755734583005282334/158a0c81f5a3bd1f283bedd5f817a524.webp?size=1024",
@@ -275,7 +335,7 @@ class moniteur:
                                 "value": f"```{configs['embed-color-text']}\n{info['username']}```",
                                 "inline": True
                             })
-                        result = requests.post(weburl, json=data)
+                        result = requests.post(self.webhurl, json=data)
 
                         if 429 == result.status_code:
                             print(f"{Spy.blanc}[{Spy.rouge}ERREUR{Spy.blanc}] - Rate Limit !")
@@ -286,14 +346,72 @@ class moniteur:
             except:
                 time.sleep(10)
 
+# Main bot loop
+# At each loop : look at sub modifications & load / relaod / stop bot depending on
 
-if len(configs["suburl"]) > 10:
-    print(
-        f"{Spy.blanc}[{Spy.rouge}ERREUR{Spy.blanc}] - Trop de salon veuillez en enlever car le bot se fera rate limit !")
-else:
-    for webhurl in configs["suburl"]:
+class SaloonInspector:
+
+    def __init__(self, saloon_name):
+        self.name= saloon_name
+        self.vinted_thread = []
+        self.web_url = []
+        self.is_alive = False
+
+#######
+# Main function
+#######
+Saloons = dict()
+while True:
+
+    with open("config.json", 'r') as config:
+        configs = json.load(config)
+
+    # Reset all is_alive properties
+    for saloon in Saloons.values():
+        saloon.is_alive = False
+
+    #TODO :  Move this "if" elsewhere
+    if len(configs["suburl"]) > configs["bot-timing"]["max_thread_numbers"]:
         print(
-            f"{Spy.blanc}[{Spy.violet}LANCEMENT{Spy.blanc}] - Lancement de la tâche dans le salon {Spy.jaune}{configs['suburl'][webhurl]['salon']}")
+            f"{Spy.blanc}[{Spy.rouge}ERREUR{Spy.blanc}] - Trop de salon veuillez en enlever car le bot se fera rate limit !")
+    else:
 
-        t = threading.Thread(target=moniteur, args=[webhurl, configs["suburl"][str(webhurl)]["url"]])
-        t.start()
+        for webhurl in configs["suburl"]:
+
+            saloon_name = configs['suburl'][webhurl]['salon']
+            saloon_name = saloon_name.encode('utf-8', 'ignore')
+
+            print(
+                f"{Spy.blanc}[{Spy.violet}LANCEMENT{Spy.blanc}] - Lancement de la tâche dans le salon {Spy.jaune}{configs['suburl'][webhurl]['salon']}")
+
+            url = configs["suburl"][str(webhurl)]["url"]
+
+            if saloon_name in Saloons:
+                saloon_inspector = Saloons[saloon_name]
+                if saloon_inspector.web_url != webhurl :
+                    saloon_inspector.vinted_thread.stop()
+                    saloon_inspector.vinted_thread = Moniteur(webhurl=webhurl, url=url, args=[webhurl, url])
+                    saloon_inspector.vinted_thread.start()
+
+                # Saloon found : keep it alive
+                saloon_inspector.is_alive = True
+            else:
+
+                # add a new thread for this salon
+                saloon_inspector = SaloonInspector(saloon_name)
+                saloon_inspector.vinted_thread =Moniteur(webhurl=webhurl, url=url, args=[webhurl, url])
+                #saloon_inspector.vinted_thread = multiprocessing.Process(target=moniteur, args=[webhurl, configs["suburl"][str(webhurl)]["url"]])
+                saloon_inspector.web_url = webhurl
+                saloon_inspector.is_alive = True
+                saloon_inspector.vinted_thread.start()
+
+                Saloons[saloon_name] = saloon_inspector
+
+        # Remove useless thread for deleted saloon url
+        for saloon in list(Saloons.items()):
+            if saloon[1].is_alive == False:
+                print("Arret du salon : " + str(saloon[0]))
+                saloon[1].vinted_thread.stop()
+                del Saloons[saloon[0]]
+
+    time.sleep(30)

@@ -1,9 +1,18 @@
 {
-    "token": "",
+    "token": "MTA0MjM4NDMyMjQ1MzMxNTY3NQ.G1u37X.m2omL4JQ7-5vi_H7Kk8bgCUYaS630URHwg5tj0",
     "prefix": "$",
     "status": "Dev by 2$py#6495",
+    "send_all_items": "oui",
     "suburl": {
+        "https://discord.com/api/webhooks/1043516440281620542/cLBr5ARQGg52HBsxULpXj_JcwoshvUY4fwyaOu1g6Osl-eDJ6UJJHZYcq8gIAy0NUmaV": {
+            "url": "https://www.vinted.fr/vetements?search_text=Cargo%20carhartt&brand_id[]=362&status[]=6&status[]=1&status[]=2&price_from=0&price_to=50&order=newest_first",
+            "salon": "cargo-carhartt"
         },
+        "https://discord.com/api/webhooks/1043518599341539329/Sh2JYuB-ixL2fVTn_VbooeIrfwnpbA4qR5nzeudSKLcuWxWdXsxqwqiYG9kBGt8jwHIy": {
+            "url": "https://www.vinted.fr/vetements?search_text=Jogging%20nike&brand_id[]=53&order=newest_first&price_from=0&price_to=30.00&status[]=6&status[]=1&status[]=2",
+            "salon": "jogging-nike"
+        }
+    },
     "embed-color-text": "YAML",
     "embed-color": 16777215,
     "embed-config": {
@@ -15,5 +24,11 @@
         "taille": "oui",
         "couleur": "oui",
         "etat": "oui"
+    },
+    "bot-timing":{
+        "sleep_time_item_found": 1,
+        "sleep_time_between_requests": 5,
+        "max_thread_numbers": 10,
+        "max_salon":10
     }
 }
